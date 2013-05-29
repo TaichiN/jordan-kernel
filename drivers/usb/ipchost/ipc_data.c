@@ -42,7 +42,7 @@
 #include <linux/usb_ipc.h>
 #include <linux/kthread.h>
 #include <linux/freezer.h>
-
+#undef CONFIG_PM
 #ifdef USE_OMAP_SDMA
 #include <plat/dma.h>
 #endif
@@ -719,10 +719,12 @@ static void usb_ipc_disconnect(struct usb_interface *intf)
 	    USB_IPC_DATA_IF_NUM) {
 		usb_ipc_data_disconnect(intf);
 	}
+#ifdef CONFIG_IPC_LOG
 	if (intf->cur_altsetting->desc.bInterfaceNumber ==
 	    USB_IPC_LOG_IF_NUM) {
 		usb_ipc_log_disconnect(intf);
 	}
+#endif
 }
 
 /*
@@ -738,12 +740,12 @@ static int usb_ipc_probe(struct usb_interface *intf,
 	    USB_IPC_DATA_IF_NUM) {
 		return usb_ipc_data_probe(intf, id);
 	}
-
+#ifdef CONFIG_IPC_LOG
 	if (intf->cur_altsetting->desc.bInterfaceNumber ==
 	    USB_IPC_LOG_IF_NUM) {
 		return usb_ipc_log_probe(intf, id);
 	}
-
+#endif
 	return -ENOMEM;
 }
 
@@ -882,18 +884,20 @@ static int __init usb_ipc_init(void)
 	result = usb_ipc_data_init();
 	if (result != 0)
 		return result;
-
+#ifdef CONFIG_IPC_LOG
 	/* ipc DATA interface log initialization */
 	result = usb_ipc_log_init();
 	if (result != 0) {
 		usb_ipc_data_exit();
 		return result;
 	}
-
+#endif
 	result = usb_register(&usb_ipc_driver);
 	if (result < 0) {
 		usb_ipc_data_exit();
+#ifdef CONFIG_IPC_LOG
 		usb_ipc_log_exit();
+#endif
 		printk(KERN_ERR "%s: Register USB IPC driver failed", __func__);
 		return -1;
 	}
@@ -913,8 +917,9 @@ static void __exit usb_ipc_exit(void)
 	usb_ipc_data_exit();
 
 	/* USB IPC LOG driver exit */
+#ifdef CONFIG_IPC_LOG
 	usb_ipc_log_exit();
-
+#endif
 	/* unregister USB IPC driver */
 	usb_deregister(&usb_ipc_driver);
 

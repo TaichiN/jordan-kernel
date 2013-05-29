@@ -14,6 +14,10 @@ config USB_IPC
 	  To compile this driver as a module, choose M here: the
 	  module will be called usb-ipc.
 
+config USB_IPC_LOG
+	tristate "USB IPC LOG support"
+	depends on USB
+
 config USB_IPC_TEST
         tristate "USB IPC TEST support"
         depends on USB_IPC
