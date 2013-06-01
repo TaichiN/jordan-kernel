@@ -42,7 +42,7 @@
 #include <linux/usb_ipc.h>
 #include <linux/kthread.h>
 #include <linux/freezer.h>
-#undef CONFIG_PM
+
 #ifdef USE_OMAP_SDMA
 #include <plat/dma.h>
 #endif
@@ -82,9 +82,11 @@ DECLARE_WAIT_QUEUE_HEAD(kipcd_wait);
 /*  */
 USB_IPC_IFS_STRUCT usb_ipc_data_param;
 
+#ifdef CONFIG_IPC_LOG
 #ifdef CONFIG_PM
 extern USB_LOG_IFS_STRUCT ipc_log_param;
 #endif	/* CONFIG_PM */
+#endif
 
 /******************************************************/
 
@@ -777,10 +779,12 @@ static int usb_ipc_suspend(struct usb_interface *iface,
 			DEBUG("%s:suspend ipc data interface @ jiffies=%lu\n",
 				__func__, jiffies);
 		}
+#ifdef CONFIG_IPC_LOG
 	} else if (iface->cur_altsetting->desc.bInterfaceNumber ==
 		   USB_IPC_LOG_IF_NUM) {
 		DEBUG("%s:suspend ipc log interface @ jiffies=%lu\n",
 		      __func__, jiffies);
+#endif
 	}
 	spin_unlock_bh(&usb_ipc_data_param.pm_lock);
 
@@ -822,6 +826,7 @@ static int usb_ipc_resume(struct usb_interface *iface)
 			usb_ipc_data_param.write_urb_used = 0;
 			DEBUG("data write urb restarted, ret=%d.\n", ret);
 		}
+#ifdef CONFIG_IPC_LOG
 	} else if (iface->cur_altsetting->desc.bInterfaceNumber ==
 		   USB_IPC_LOG_IF_NUM) {
 		DEBUG("%s:resume ipc log interface @ jiffies=%lu\n",
@@ -841,6 +846,7 @@ static int usb_ipc_resume(struct usb_interface *iface)
 				ipc_log_param.urb_flag = 1;
 			DEBUG("log read urb restarted, ret=%d.\n", ret);
 		}
+#endif
 	}
 	spin_unlock_bh(&usb_ipc_data_param.pm_lock);
 
