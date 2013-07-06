@@ -87,6 +87,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 extern struct platform_device *gpsPVRLDMDev;
 #endif
 
+extern int gpu_main_control(void);
+
 static PVRSRV_ERROR PowerLockWrap(SYS_SPECIFIC_DATA *psSysSpecData, IMG_BOOL bTryLock)
 {
 	if (!in_interrupt())
@@ -658,7 +660,7 @@ static PVRSRV_ERROR AcquireGPTimer(SYS_SPECIFIC_DATA *psSysSpecData)
 	if (IS_ERR(psCLK))
 	{
 		PVR_DPF((PVR_DBG_ERROR, "EnableSystemClocks: Couldn't get SGX Interface Clock"));
-		return;
+		return 0;
 	}
 
 	clk_enable(psCLK);
@@ -668,7 +670,7 @@ static PVRSRV_ERROR AcquireGPTimer(SYS_SPECIFIC_DATA *psSysSpecData)
 	if (IS_ERR(psCLK))
 	{
 		PVR_DPF((PVR_DBG_ERROR, "EnableSystemClocks: Couldn't get SGX Interface Clock"));
-		return;
+		return 0;
 	}
 
 	clk_enable(psCLK);

@@ -31,20 +31,7 @@
 #include <asm/div64.h>
 #include <asm/sections.h>	/* for dereference_function_descriptor() */
 
-/* Works only for digits and letters, but small and fast */
-#define TOLOWER(x) ((x) | 0x20)
-
-static unsigned int simple_guess_base(const char *cp)
-{
-	if (cp[0] == '0') {
-		if (TOLOWER(cp[1]) == 'x' && isxdigit(cp[2]))
-			return 16;
-		else
-			return 8;
-	} else {
-		return 10;
-	}
-}
+#include "kstrtox.h"
 
 /**
  * simple_strtoull - convert a string to an unsigned long long
@@ -54,23 +41,14 @@ static unsigned int simple_guess_base(const char *cp)
  */
 unsigned long long simple_strtoull(const char *cp, char **endp, unsigned int base)
 {
-	unsigned long long result = 0;
+	unsigned long long result;
+	unsigned int rv;
 
-	if (!base)
-		base = simple_guess_base(cp);
+	cp = _parse_integer_fixup_radix(cp, &base);
+	rv = _parse_integer(cp, base, &result);
+	/* FIXME */
+	cp += (rv & ~KSTRTOX_OVERFLOW);
 
-	if (base == 16 && cp[0] == '0' && TOLOWER(cp[1]) == 'x')
-		cp += 2;
-
-	while (isxdigit(*cp)) {
-		unsigned int value;
-
-		value = isdigit(*cp) ? *cp - '0' : TOLOWER(*cp) - 'a' + 10;
-		if (value >= base)
-			break;
-		result = result * base + value;
-		cp++;
-	}
 	if (endp)
 		*endp = (char *)cp;
 
@@ -119,147 +97,6 @@ long long simple_strtoll(const char *cp, char **endp, unsigned int base)
 	return simple_strtoull(cp, endp, base);
 }
 EXPORT_SYMBOL(simple_strtoll);
-
-/**
- * strict_strtoul - convert a string to an unsigned long strictly
- * @cp: The string to be converted
- * @base: The number base to use
- * @res: The converted result value
- *
- * strict_strtoul converts a string to an unsigned long only if the
- * string is really an unsigned long string, any string containing
- * any invalid char at the tail will be rejected and -EINVAL is returned,
- * only a newline char at the tail is acceptible because people generally
- * change a module parameter in the following way:
- *
- * 	echo 1024 > /sys/module/e1000/parameters/copybreak
- *
- * echo will append a newline to the tail.
- *
- * It returns 0 if conversion is successful and *res is set to the converted
- * value, otherwise it returns -EINVAL and *res is set to 0.
- *
- * simple_strtoul just ignores the successive invalid characters and
- * return the converted value of prefix part of the string.
- */
-int strict_strtoul(const char *cp, unsigned int base, unsigned long *res)
-{
-	char *tail;
-	unsigned long val;
-
-	*res = 0;
-	if (!*cp)
-		return -EINVAL;
-
-	val = simple_strtoul(cp, &tail, base);
-	if (tail == cp)
-		return -EINVAL;
-
-	if ((tail[0] == '\0') || (tail[0] == '\n' && tail[1] == '\0')) {
-		*res = val;
-		return 0;
-	}
-
-	return -EINVAL;
-}
-EXPORT_SYMBOL(strict_strtoul);
-
-/**
- * strict_strtol - convert a string to a long strictly
- * @cp: The string to be converted
- * @base: The number base to use
- * @res: The converted result value
- *
- * strict_strtol is similiar to strict_strtoul, but it allows the first
- * character of a string is '-'.
- *
- * It returns 0 if conversion is successful and *res is set to the converted
- * value, otherwise it returns -EINVAL and *res is set to 0.
- */
-int strict_strtol(const char *cp, unsigned int base, long *res)
-{
-	int ret;
-	if (*cp == '-') {
-		ret = strict_strtoul(cp + 1, base, (unsigned long *)res);
-		if (!ret)
-			*res = -(*res);
-	} else {
-		ret = strict_strtoul(cp, base, (unsigned long *)res);
-	}
-
-	return ret;
-}
-EXPORT_SYMBOL(strict_strtol);
-
-/**
- * strict_strtoull - convert a string to an unsigned long long strictly
- * @cp: The string to be converted
- * @base: The number base to use
- * @res: The converted result value
- *
- * strict_strtoull converts a string to an unsigned long long only if the
- * string is really an unsigned long long string, any string containing
- * any invalid char at the tail will be rejected and -EINVAL is returned,
- * only a newline char at the tail is acceptible because people generally
- * change a module parameter in the following way:
- *
- * 	echo 1024 > /sys/module/e1000/parameters/copybreak
- *
- * echo will append a newline to the tail of the string.
- *
- * It returns 0 if conversion is successful and *res is set to the converted
- * value, otherwise it returns -EINVAL and *res is set to 0.
- *
- * simple_strtoull just ignores the successive invalid characters and
- * return the converted value of prefix part of the string.
- */
-int strict_strtoull(const char *cp, unsigned int base, unsigned long long *res)
-{
-	char *tail;
-	unsigned long long val;
-
-	*res = 0;
-	if (!*cp)
-		return -EINVAL;
-
-	val = simple_strtoull(cp, &tail, base);
-	if (tail == cp)
-		return -EINVAL;
-	if ((tail[0] == '\0') || (tail[0] == '\n' && tail[1] == '\0')) {
-		*res = val;
-		return 0;
-	}
-
-	return -EINVAL;
-}
-EXPORT_SYMBOL(strict_strtoull);
-
-/**
- * strict_strtoll - convert a string to a long long strictly
- * @cp: The string to be converted
- * @base: The number base to use
- * @res: The converted result value
- *
- * strict_strtoll is similiar to strict_strtoull, but it allows the first
- * character of a string is '-'.
- *
- * It returns 0 if conversion is successful and *res is set to the converted
- * value, otherwise it returns -EINVAL and *res is set to 0.
- */
-int strict_strtoll(const char *cp, unsigned int base, long long *res)
-{
-	int ret;
-	if (*cp == '-') {
-		ret = strict_strtoull(cp + 1, base, (unsigned long long *)res);
-		if (!ret)
-			*res = -(*res);
-	} else {
-		ret = strict_strtoull(cp, base, (unsigned long long *)res);
-	}
-
-	return ret;
-}
-EXPORT_SYMBOL(strict_strtoll);
 
 static noinline_for_stack
 int skip_atoi(const char **s)
@@ -1153,8 +990,8 @@ precision:
 qualifier:
 	/* get the conversion qualifier */
 	spec->qualifier = -1;
-	if (*fmt == 'h' || TOLOWER(*fmt) == 'l' ||
-	    TOLOWER(*fmt) == 'z' || *fmt == 't') {
+	if (*fmt == 'h' || _tolower(*fmt) == 'l' ||
+	    _tolower(*fmt) == 'z' || *fmt == 't') {
 		spec->qualifier = *fmt++;
 		if (unlikely(spec->qualifier == *fmt)) {
 			if (spec->qualifier == 'l') {
@@ -1221,7 +1058,7 @@ qualifier:
 			spec->type = FORMAT_TYPE_LONG;
 		else
 			spec->type = FORMAT_TYPE_ULONG;
-	} else if (TOLOWER(spec->qualifier) == 'z') {
+	} else if (_tolower(spec->qualifier) == 'z') {
 		spec->type = FORMAT_TYPE_SIZE_T;
 	} else if (spec->qualifier == 't') {
 		spec->type = FORMAT_TYPE_PTRDIFF;
@@ -1380,7 +1217,7 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list args)
 			if (qualifier == 'l') {
 				long *ip = va_arg(args, long *);
 				*ip = (str - buf);
-			} else if (TOLOWER(qualifier) == 'z') {
+			} else if (_tolower(qualifier) == 'z') {
 				size_t *ip = va_arg(args, size_t *);
 				*ip = (str - buf);
 			} else {
@@ -1669,7 +1506,7 @@ do {									\
 			void *skip_arg;
 			if (qualifier == 'l')
 				skip_arg = va_arg(args, long *);
-			else if (TOLOWER(qualifier) == 'z')
+			else if (_tolower(qualifier) == 'z')
 				skip_arg = va_arg(args, size_t *);
 			else
 				skip_arg = va_arg(args, int *);
@@ -1975,8 +1812,8 @@ int vsscanf(const char *buf, const char *fmt, va_list args)
 
 		/* get conversion qualifier */
 		qualifier = -1;
-		if (*fmt == 'h' || TOLOWER(*fmt) == 'l' ||
-		    TOLOWER(*fmt) == 'z') {
+		if (*fmt == 'h' || _tolower(*fmt) == 'l' ||
+		    _tolower(*fmt) == 'z') {
 			qualifier = *fmt++;
 			if (unlikely(qualifier == *fmt)) {
 				if (qualifier == 'h') {
