@@ -29,18 +29,64 @@
 #include <linux/genhd.h>
 #include <linux/highmem.h>
 #include <linux/slab.h>
-#include <linux/lzo.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+#include <linux/swap.h>
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 #include "zram_drv.h"
 
+#if defined(CONFIG_ZRAM_LZO)
+#include <linux/lzo.h>
+#define WMSIZE		LZO1X_MEM_COMPRESS
+#define COMPRESS(s, sl, d, dl, wm)	\
+	lzo1x_1_compress(s, sl, d, dl, wm)
+#define DECOMPRESS(s, sl, d, dl)	\
+	lzo1x_decompress_safe(s, sl, d, dl)
+#elif defined(CONFIG_ZRAM_SNAPPY)
+#include "../snappy/csnappy.h" /* if built in drivers/staging */
+#define WMSIZE_ORDER	((PAGE_SHIFT > 14) ? (15) : (PAGE_SHIFT+1))
+#define WMSIZE		(1 << WMSIZE_ORDER)
+static int
+snappy_compress_(
+	const unsigned char *src,
+	size_t src_len,
+	unsigned char *dst,
+	size_t *dst_len,
+	void *workmem)
+{
+	const unsigned char *end = csnappy_compress_fragment(
+		src, (uint32_t)src_len, dst, workmem, WMSIZE_ORDER);
+	*dst_len = end - dst;
+	return 0;
+}
+static int
+snappy_decompress_(
+	const unsigned char *src,
+	size_t src_len,
+	unsigned char *dst,
+	size_t *dst_len)
+{
+	uint32_t dst_len_ = (uint32_t)*dst_len;
+	int ret = csnappy_decompress_noheader(src, src_len, dst, &dst_len_);
+	*dst_len = (size_t)dst_len_;
+	return ret;
+}
+#define COMPRESS(s, sl, d, dl, wm)	\
+	snappy_compress_(s, sl, d, dl, wm)
+#define DECOMPRESS(s, sl, d, dl)	\
+	snappy_decompress_(s, sl, d, dl)
+#else
+#error either CONFIG_ZRAM_LZO or CONFIG_ZRAM_SNAPPY must be defined
+#endif
+
 /* Globals */
 static int zram_major;
-struct zram *devices;
+struct zram *zram_devices;
 
 /* Module params (documentation at end) */
-unsigned int num_devices;
+unsigned int zram_num_devices;
 
 static void zram_stat_inc(u32 *v)
 {
@@ -132,6 +178,22 @@ static void zram_set_disksize(struct zram *zram, size_t totalram_bytes)
 
 	zram->disksize &= PAGE_MASK;
 }
+
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+/*
+ * Swap header (1st page of swap device) contains information
+ * about a swap file/partition. Prepare such a header for the
+ * given ramzswap device so that swapon can identify it as a
+ * swap partition.
+ */
+static void setup_swap_header(struct zram *zram, union swap_header *s)
+{
+	s->info.version = 1;
+	s->info.last_page = (zram->disksize >> PAGE_SHIFT) - 1;
+	s->info.nr_badpages = 0;
+	memcpy(s->magic.magic, "SWAPSPACE2", 10);
+}
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 static void zram_free_page(struct zram *zram, size_t index)
 {
@@ -257,9 +319,10 @@ static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
 	cmem = kmap_atomic(zram->table[index].page, KM_USER1) +
 		zram->table[index].offset;
 
-	ret = lzo1x_decompress_safe(cmem + sizeof(*zheader),
-				    xv_get_object_size(cmem) - sizeof(*zheader),
-				    uncmem, &clen);
+	ret = DECOMPRESS(
+		cmem + sizeof(*zheader),
+		xv_get_object_size(cmem) - sizeof(*zheader),
+		uncmem, &clen);
 
 	if (is_partial_io(bvec)) {
 		memcpy(user_mem + bvec->bv_offset, uncmem + offset,
@@ -271,7 +334,7 @@ static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
 	kunmap_atomic(user_mem, KM_USER0);
 
 	/* Should NEVER happen. Return bio error if it does. */
-	if (unlikely(ret != LZO_E_OK)) {
+	if (unlikely(ret)) {
 		pr_err("Decompression failed! err=%d, page=%u\n", ret, index);
 		zram_stat64_inc(zram, &zram->stats.failed_reads);
 		return ret;
@@ -305,13 +368,13 @@ static int zram_read_before_write(struct zram *zram, char *mem, u32 index)
 		return 0;
 	}
 
-	ret = lzo1x_decompress_safe(cmem + sizeof(*zheader),
-				    xv_get_object_size(cmem) - sizeof(*zheader),
-				    mem, &clen);
+	ret = DECOMPRESS(cmem + sizeof(*zheader),
+		xv_get_object_size(cmem) - sizeof(*zheader),
+		mem, &clen);
 	kunmap_atomic(cmem, KM_USER0);
 
 	/* Should NEVER happen. Return bio error if it does. */
-	if (unlikely(ret != LZO_E_OK)) {
+	if (unlikely(ret)) {
 		pr_err("Decompression failed! err=%d, page=%u\n", ret, index);
 		zram_stat64_inc(zram, &zram->stats.failed_reads);
 		return ret;
@@ -377,14 +440,15 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 		goto out;
 	}
 
-	ret = lzo1x_1_compress(uncmem, PAGE_SIZE, src, &clen,
-			       zram->compress_workmem);
+	COMPRESS(uncmem, PAGE_SIZE, src, &clen,
+		zram->compress_workmem);
+	ret = 0;
 
 	kunmap_atomic(user_mem, KM_USER0);
 	if (is_partial_io(bvec))
 			kfree(uncmem);
 
-	if (unlikely(ret != LZO_E_OK)) {
+	if (unlikely(ret != 0)) {
 		pr_err("Compression failed! err=%d\n", ret);
 		goto out;
 	}
@@ -624,6 +688,10 @@ int zram_init_device(struct zram *zram)
 {
 	int ret;
 	size_t num_pages;
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	struct page *page;
+	union swap_header *swap_header;
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 	mutex_lock(&zram->init_lock);
 
@@ -634,7 +702,7 @@ int zram_init_device(struct zram *zram)
 
 	zram_set_disksize(zram, totalram_pages << PAGE_SHIFT);
 
-	zram->compress_workmem = kzalloc(LZO1X_MEM_COMPRESS, GFP_KERNEL);
+	zram->compress_workmem = kzalloc(WMSIZE, GFP_KERNEL);
 	if (!zram->compress_workmem) {
 		pr_err("Error allocating compressor working memory!\n");
 		ret = -ENOMEM;
@@ -658,6 +726,19 @@ int zram_init_device(struct zram *zram)
 		goto fail;
 	}
 
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	page = alloc_page(__GFP_ZERO);
+	if (!page) {
+		pr_err("Error allocating swap header page\n");
+		ret = -ENOMEM;
+		goto fail;
+	}
+	zram->table[0].page = page;
+	zram_set_flag(zram, 0, ZRAM_UNCOMPRESSED);
+	swap_header = kmap(page);
+	setup_swap_header(zram, swap_header);
+	kunmap(page);
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 	set_capacity(zram->disk, zram->disksize >> SECTOR_SHIFT);
 
 	/* zram devices sort of resembles non-rotational disks */
@@ -780,9 +861,9 @@ static int __init zram_init(void)
 {
 	int ret, dev_id;
 
-	if (num_devices > max_num_devices) {
-		pr_warning("Invalid value for num_devices: %u\n",
-				num_devices);
+	if (zram_num_devices > max_num_devices) {
+		pr_warning("Invalid value for zram_num_devices: %u\n",
+				zram_num_devices);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -794,21 +875,21 @@ static int __init zram_init(void)
 		goto out;
 	}
 
-	if (!num_devices) {
-		pr_info("num_devices not specified. Using default: 1\n");
-		num_devices = 1;
+	if (!zram_num_devices) {
+		pr_info("zram_num_devices not specified. Using default: 1\n");
+		zram_num_devices = 1;
 	}
 
 	/* Allocate the device array and initialize each one */
-	pr_info("Creating %u devices ...\n", num_devices);
-	devices = kzalloc(num_devices * sizeof(struct zram), GFP_KERNEL);
-	if (!devices) {
+	pr_info("Creating %u devices ...\n", zram_num_devices);
+	zram_devices = kzalloc(zram_num_devices * sizeof(struct zram), GFP_KERNEL);
+	if (!zram_devices) {
 		ret = -ENOMEM;
 		goto unregister;
 	}
 
-	for (dev_id = 0; dev_id < num_devices; dev_id++) {
-		ret = create_device(&devices[dev_id], dev_id);
+	for (dev_id = 0; dev_id < zram_num_devices; dev_id++) {
+		ret = create_device(&zram_devices[dev_id], dev_id);
 		if (ret)
 			goto free_devices;
 	}
@@ -817,8 +898,8 @@ static int __init zram_init(void)
 
 free_devices:
 	while (dev_id)
-		destroy_device(&devices[--dev_id]);
-	kfree(devices);
+		destroy_device(&zram_devices[--dev_id]);
+	kfree(zram_devices);
 unregister:
 	unregister_blkdev(zram_major, "zram");
 out:
@@ -830,8 +911,8 @@ static void __exit zram_exit(void)
 	int i;
 	struct zram *zram;
 
-	for (i = 0; i < num_devices; i++) {
-		zram = &devices[i];
+	for (i = 0; i < zram_num_devices; i++) {
+		zram = &zram_devices[i];
 
 		destroy_device(zram);
 		if (zram->init_done)
@@ -840,12 +921,12 @@ static void __exit zram_exit(void)
 
 	unregister_blkdev(zram_major, "zram");
 
-	kfree(devices);
+	kfree(zram_devices);
 	pr_debug("Cleanup done!\n");
 }
 
-module_param(num_devices, uint, 0);
-MODULE_PARM_DESC(num_devices, "Number of zram devices");
+module_param(zram_num_devices, uint, 0);
+MODULE_PARM_DESC(zram_num_devices, "Number of zram devices");
 
 module_init(zram_init);
 module_exit(zram_exit);
