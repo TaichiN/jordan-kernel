@@ -2393,6 +2393,17 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state,
 	rq = __task_rq_lock(p);
 	update_rq_clock(rq);
 
+	if (rq->idle_stamp) {
+		u64 delta = rq->clock - rq->idle_stamp;
+		u64 max = 2*sysctl_sched_migration_cost;
+
+		if (delta > max)
+			rq->avg_idle = max;
+		else
+			update_avg(&rq->avg_idle, delta);
+		rq->idle_stamp = 0;
+	}
+
 	WARN_ON(p->state != TASK_WAKING);
 	cpu = task_cpu(p);
 
@@ -5516,8 +5527,11 @@ need_resched_nonpreemptible:
 
 	post_schedule(rq);
 
-	if (unlikely(reacquire_kernel_lock(current) < 0))
+	if (unlikely(reacquire_kernel_lock(current) < 0)) {
+		prev = rq->curr;
+		switch_count = &prev->nivcsw;
 		goto need_resched_nonpreemptible;
+	}
 
 	preempt_enable_no_resched();
 	if (need_resched())
@@ -6302,9 +6316,12 @@ recheck:
 	    (p->mm && param->sched_priority > MAX_USER_RT_PRIO-1) ||
 	    (!p->mm && param->sched_priority > MAX_RT_PRIO-1))
 		return -EINVAL;
-	if (rt_policy(policy) != (param->sched_priority != 0))
-		return -EINVAL;
 
+	if (rt_policy(policy) != (param->sched_priority != 0)) {
+		// Motorola "opprofdaemon" fix, sched_setscheduler(2837, SCHED_RR, { 0 }) = -1 EINVAL (Invalid argument)
+		printk("opprofdaemon: sched_priority: %d\n", param->sched_priority);
+		//return -EINVAL;
+	}
 	/*
 	 * Allow unprivileged RT tasks to decrease priority:
 	 */
@@ -6318,8 +6335,9 @@ recheck:
 			unlock_task_sighand(p, &flags);
 
 			/* can't set/change the rt policy */
-			if (policy != p->policy && !rlim_rtprio)
-				return -EPERM;
+			// Motorola "opprofdaemon" fix, sched_setscheduler(2743, SCHED_RR, { 0 }) = -1 EPERM (Operation not permitted)
+			//if (policy != p->policy && !rlim_rtprio)
+			//	return -EPERM;
 
 			/* can't increase priority */
 			if (param->sched_priority > p->rt_priority &&
@@ -9669,7 +9687,7 @@ void __init sched_init(void)
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
 static inline int preempt_count_equals(int preempt_offset)
 {
-	int nested = preempt_count() & ~PREEMPT_ACTIVE;
+	int nested = (preempt_count() & ~PREEMPT_ACTIVE) + rcu_preempt_depth();
 
 	return (nested == PREEMPT_INATOMIC_BASE + preempt_offset);
 }
@@ -10513,6 +10531,20 @@ cpu_cgroup_destroy(struct cgroup_subsys *ss, struct cgroup *cgrp)
 }
 
 static int
+cpu_cgroup_allow_attach(struct cgroup *cgrp, struct task_struct *tsk)
+{
+	const struct cred *cred = current_cred(), *tcred;
+
+	tcred = __task_cred(tsk);
+
+	if ((current != tsk) && !capable(CAP_SYS_NICE) &&
+	    cred->euid != tcred->uid && cred->euid != tcred->suid)
+		return -EACCES;
+
+	return 0;
+}
+
+static int
 cpu_cgroup_can_attach_task(struct cgroup *cgrp, struct task_struct *tsk)
 {
 	if ((current != tsk) && (!capable(CAP_SYS_NICE))) {
@@ -10643,6 +10675,7 @@ struct cgroup_subsys cpu_cgroup_subsys = {
 	.name		= "cpu",
 	.create		= cpu_cgroup_create,
 	.destroy	= cpu_cgroup_destroy,
+	.allow_attach	= cpu_cgroup_allow_attach,
 	.can_attach	= cpu_cgroup_can_attach,
 	.attach		= cpu_cgroup_attach,
 	.populate	= cpu_cgroup_populate,

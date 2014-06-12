@@ -945,6 +945,7 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 	sched_autogroup_fork(sig);
 
 	sig->oom_adj = current->signal->oom_adj;
+	sig->oom_score_adj = current->signal->oom_score_adj;
 
 	return 0;
 }
@@ -1107,6 +1108,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->prev_stime = cputime_zero;
 #endif
 
+   /*
+   	* Save current task's (not effective) timer slack value as default
+   	* timer slack value for new task.
+   	*/
 	p->default_timer_slack_ns = current->timer_slack_ns;
 
 	task_io_accounting_init(&p->ioac);

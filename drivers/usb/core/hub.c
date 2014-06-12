@@ -40,7 +40,9 @@
 #define CONFIG_USB_ANNOUNCE_NEW_DEVICES
 #endif
 #endif
-
+#ifdef CONFIG_MAPPHONE_2NDBOOT
+static int w3g_hack_done = 0;
+#endif
 struct usb_hub {
 	struct device		*intfdev;	/* the "interface" device */
 	struct usb_device	*hdev;
@@ -2600,6 +2602,15 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	enum usb_device_speed	oldspeed = udev->speed;
 	char 			*speed, *type;
 	int			devnum = udev->devnum;
+	bool do_reset = true;
+
+#ifdef CONFIG_MAPPHONE_2NDBOOT
+	// do not reset first USB bus (modem) on 2ndboot,
+	// but reset on device connect in host mode
+	if (hdev->bus->busnum == 1 && !w3g_hack_done)
+		do_reset = false;
+
+#endif
 
 	/* root hub ports have a slightly longer reset period
 	 * (from USB 2.0 spec, section 7.1.7.5)
@@ -2630,11 +2641,10 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	} else {
 		/* Reset the device; full speed may morph to high speed */
 		/* FIXME a USB 2.0 device may morph into SuperSpeed on reset. */
-#ifndef CONFIG_MAPPHONE_2NDBOOT
-		retval = hub_port_reset(hub, port1, udev, delay);
-#else
-		retval = 0;
-#endif
+		if (do_reset)
+			retval = hub_port_reset(hub, port1, udev, delay);
+		else
+			retval = 0;
 		if (retval < 0)		/* error or disconnect */
 			goto fail;
 		/* success, speed is known */
@@ -2646,10 +2656,10 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 		goto fail;
 	}
 
-#ifdef CONFIG_MAPPHONE_2NDBOOT
-	udev->speed = USB_SPEED_HIGH;
-	udev->state = USB_STATE_UNAUTHENTICATED;
-#endif
+	if(!do_reset) {
+		udev->speed = USB_SPEED_HIGH;
+		udev->state = USB_STATE_UNAUTHENTICATED;
+	}
 
 	oldspeed = udev->speed;
 
@@ -2746,13 +2756,24 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 				buf->bMaxPacketSize0 = 0;
 #ifndef CONFIG_MAPPHONE_2NDBOOT
 				r = usb_control_msg(udev, usb_rcvaddr0pipe(),
-#else
-				r = usb_control_msg(udev, (PIPE_CONTROL << 30) | (0x02 << 8) | USB_DIR_IN,
-#endif
 					USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
 					USB_DT_DEVICE << 8, 0,
 					buf, GET_DESCRIPTOR_BUFSIZE,
 					initial_descriptor_timeout);
+#else
+				if (do_reset)
+					r = usb_control_msg(udev, usb_rcvaddr0pipe(),
+						USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
+						USB_DT_DEVICE << 8, 0,
+						buf, GET_DESCRIPTOR_BUFSIZE,
+						initial_descriptor_timeout);
+				else
+					r = usb_control_msg(udev, (PIPE_CONTROL << 30) | (0x02 << 8) | USB_DIR_IN,
+						USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
+						USB_DT_DEVICE << 8, 0,
+						buf, GET_DESCRIPTOR_BUFSIZE,
+						initial_descriptor_timeout);
+#endif
 				switch (buf->bMaxPacketSize0) {
 				case 8: case 16: case 32: case 64: case 255:
 					if (buf->bDescriptorType ==
@@ -2773,11 +2794,10 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 					buf->bMaxPacketSize0;
 			kfree(buf);
 
-#ifndef CONFIG_MAPPHONE_2NDBOOT
-			retval = hub_port_reset(hub, port1, udev, delay);
-#else
-			retval = 0;
-#endif
+			if (do_reset)
+				retval = hub_port_reset(hub, port1, udev, delay);
+			else
+				retval = 0;
 			if (retval < 0)		/* error or disconnect */
 				goto fail;
 			if (oldspeed != udev->speed) {
@@ -2802,21 +2822,22 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
  		 * authorization will assign the final address.
  		 */
 		if (udev->wusb == 0) {
-#ifndef CONFIG_MAPPHONE_2NDBOOT
-			for (j = 0; j < SET_ADDRESS_TRIES; ++j) {
-				retval = hub_set_address(udev, devnum);
-				if (retval >= 0)
-					break;
-				msleep(200);
-			}
-#else
-			/* Make device use proper address. */
-			update_address(udev, devnum);
+			if (do_reset) {
+				for (j = 0; j < SET_ADDRESS_TRIES; ++j) {
+					retval = hub_set_address(udev, devnum);
+					if (retval >= 0)
+						break;
+					msleep(200);
+				}
+			} else {
+				/* Make device use proper address. */
+				update_address(udev, devnum);
 			
-			usb_set_device_state(udev, USB_STATE_ADDRESS);
-			usb_ep0_reinit(udev);
-			retval = 0;
-#endif
+				usb_set_device_state(udev, USB_STATE_ADDRESS);
+				usb_ep0_reinit(udev);
+				retval = 0;
+				w3g_hack_done = 1;
+			}
 			
 			if (retval < 0) {
 				dev_err(&udev->dev,

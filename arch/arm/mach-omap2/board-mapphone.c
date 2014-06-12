@@ -32,7 +32,6 @@
 #include <linux/led-cpcap-lm3559.h>
 #include <linux/led-lm3530.h>
 #include <linux/wl127x-rfkill.h>
-#include <linux/wl127x-test.h>
 #include <linux/gpio_mapping.h>
 #include <linux/spi/cpcap.h>
 #include <linux/spi/cpcap-regbits.h>
@@ -56,7 +55,7 @@
 #include <plat/hdq.h>
 #include <mach/system.h>
 #include <linux/wakelock.h>
-#ifdef CONFIG_ST_HCI
+#if defined(CONFIG_BT_WILINK) || defined (CONFIG_BT_WILINK_MODULE) 
 #include <linux/ti_wilink_st.h>
 #include <linux/skbuff.h>
 #endif
@@ -301,7 +300,6 @@ static void mapphone_legacy_qtouch_init(void)
 			__func__);
 		goto mapphone_legacy_qtouch_init_ret;
 	}
-#ifndef CONFIG_KOBE_BOARD
 	touch_prop = of_get_property(touch_node, DT_PROP_TOUCH_KEYMAP, &len);
 	if (touch_prop && len && (0 == len % sizeof(struct vkey))) {
 			mapphone_ts_platform_data.vkeys.count =
@@ -309,7 +307,6 @@ static void mapphone_legacy_qtouch_init(void)
 			mapphone_ts_platform_data.vkeys.keys =
 				(struct vkey *)touch_prop;
 	}
-#endif
 	touch_prop = of_get_property(touch_node, DT_PROP_TOUCH_I2C_ADDRESS,
 		&len);
 	if (touch_prop) {
@@ -387,7 +384,6 @@ static void mapphone_legacy_qtouch_init(void)
 	touch_val = of_get_property(touch_node, DT_PROP_TOUCH_Y_DELTA, &len);
 	if (touch_val && len)
 		mapphone_ts_platform_data.y_delta = *touch_val;
-#ifndef CONFIG_KOBE_BOARD
 	touch_prop = of_get_property(touch_node, DT_PROP_TOUCH_T15, &len);
 	if (touch_prop) {
 		mapphone_ts_platform_data.key_array.cfg =
@@ -405,7 +401,6 @@ static void mapphone_legacy_qtouch_init(void)
 		DT_PROP_TOUCH_KEY_ARRAY_COUNT, &len);
 	if (touch_val && len)
 		mapphone_ts_platform_data.key_array.num_keys = *touch_val;
-#endif
 	touch_prop = of_get_property(touch_node, DT_PROP_TOUCH_T7, &len);
 	if (touch_prop) {
 		mapphone_ts_platform_data.power_cfg =
@@ -802,7 +797,6 @@ static void __init mapphone_als_init(void)
 	gpio_direction_input(lm3530_int_gpio);
 	omap_cfg_reg(AC27_34XX_GPIO92);
 }
-#ifndef CONFIG_KOBE_BOARD
 static struct vkey mapphone_touch_vkeys[] = {
 	{
 		.code		= KEY_BACK,
@@ -833,31 +827,6 @@ static struct vkey mapphone_touch_vkeys[] = {
 		.height		= 57,
 	},
 };
-#else
-static struct vkey mapphone_touch_vkeys[] = {
-	{
-		.code		= KEY_BACK,
-		.center_x	= 376,
-		.center_y	= 906,
-		.width		= 36,
-		.height		= 57,
-	},
-	{
-		.code		= KEY_MENU,
-		.center_x	= 104,
-		.center_y	= 906,
-		.width		= 36,
-		.height		= 57,
-	},
-	{
-		.code		= KEY_HOME,
-		.center_x	= 240,
-		.center_y	= 906,
-		.width		= 36,
-		.height		= 57,
-	},
-};
-#endif
 static struct qtm_touch_keyarray_cfg mapphone_key_array_data[] = {
 	{
 		.ctrl		= 0,
@@ -1324,15 +1293,7 @@ static int initialize_i2c_bus_info
 	feat_prop = of_get_property(bus_node,
 			prop_name, NULL);
 	if (NULL != feat_prop) {
-	if (bus_num==3) {
-#ifndef CONFIG_KOBE_BOARD
-		device_names = "camise,HP_GEN_LENS,lm3554_led,mt9p012";
-#else
-		device_names = "camise";
-#endif
-	} else {
 		device_names = (char *)feat_prop;
-	}
 		printk(KERN_INFO
 			"I2C-%d devices: %s\n", bus_num, device_names);
 		device_name_len = strlen(device_names);
@@ -1424,7 +1385,6 @@ arch_initcall(mapphone_i2c_init);
 
 static void __init mapphone_serial_init(void)
 {
-#ifdef CONFIG_ARM_OF
 	struct device_node *uart_node;
 	const void *uart_prop;
 	struct device_node *dt_node;
@@ -1464,7 +1424,6 @@ static void __init mapphone_serial_init(void)
 
 		of_node_put(dt_node);
 	}
-#endif
 
 	omap_serial_init();
 }
@@ -1585,67 +1544,7 @@ static int __init omap_hdq_init(void)
 	return platform_device_register(&omap_hdq_device);
 }
 
-#ifndef CONFIG_BT_WILINK
-static int mapphone_wl1271_init(void);
-
-static struct wl127x_rfkill_platform_data mapphone_wl1271_pdata = {
-	.bt_nshutdown_gpio = -1,
-	.pwr_ctl = -1,
-	.fm_enable_gpio = -1,
-	.bt_hw_init = mapphone_wl1271_init,
-	.bt_hw_release = 0,
-	.bt_hw_enable =0,
-	.bt_hw_disable = 0,
-};
-
-static int mapphone_wl1271_init(void)
-{
-	/* wl1271 BT chip init sequence */
-	gpio_direction_output(mapphone_wl1271_pdata.bt_nshutdown_gpio, 0);
-	msleep(5);
-	gpio_set_value(mapphone_wl1271_pdata.bt_nshutdown_gpio, 1);
-	msleep(10);
-	gpio_set_value(mapphone_wl1271_pdata.bt_nshutdown_gpio, 0);
-	msleep(5);
-
-	return 0;
-}
-
-
-static struct platform_device mapphone_wl1271_device = {
-	.name = "wl127x-rfkill",
-	.id = 0,
-	.dev.platform_data = &mapphone_wl1271_pdata,
-};
-
-static void __init mapphone_bt_init(void)
-{
-#ifdef CONFIG_ARM_OF
-	int bt_enable_gpio;
-	int bt_wake_gpio;
-
-	bt_enable_gpio = get_gpio_by_name("bt_reset_b");
-	if (bt_enable_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_bt_init: cannot retrieve bt_reset_b gpio from device tree\n");
-		bt_enable_gpio = -1;
-	}
-	mapphone_wl1271_pdata.bt_nshutdown_gpio = bt_enable_gpio;
-
-	bt_wake_gpio = get_gpio_by_name("bt_wake_b");
-	if (bt_wake_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_bt_init: cannot retrieve bt_wake_b gpio from device tree\n");
-		bt_wake_gpio = -1;
-	}
-#endif
-
-	/* The 3 mux settings below are default; device tree will overwrite */
-
-	/* Mux setup for Bluetooth chip-enable */
-	omap_cfg_reg(T3_34XX_GPIO179);
-
-	platform_device_register(&mapphone_wl1271_device);
-}
-#else
+#if defined(CONFIG_BT_WILINK) || defined (CONFIG_BT_WILINK_MODULE) 
 
 /* wl127x BT, FM, GPS connectivity chip */
 struct ti_st_plat_data wilink_pdata = {
@@ -1671,6 +1570,63 @@ static struct platform_device *mapphone_devices[] __initdata = {
 	&btwilink_device,
 };
 
+#else
+
+static int mapphone_wl1271_init(void);
+
+static struct wl127x_rfkill_platform_data mapphone_wl1271_pdata = {
+	.bt_nshutdown_gpio = -1,
+	.pwr_ctl = -1,
+	.fm_enable_gpio = -1,
+	.bt_hw_init = mapphone_wl1271_init,
+	.bt_hw_release = 0,
+	.bt_hw_enable =0,
+	.bt_hw_disable = 0,
+};
+
+static struct platform_device mapphone_wl1271_device = {
+	.name = "wl127x-rfkill",
+	.id = 0,
+	.dev.platform_data = &mapphone_wl1271_pdata,
+};
+
+static int mapphone_wl1271_init(void)
+{
+	/* wl1271 BT chip init sequence */
+	gpio_direction_output(mapphone_wl1271_pdata.bt_nshutdown_gpio, 0);
+	msleep(5);
+	gpio_set_value(mapphone_wl1271_pdata.bt_nshutdown_gpio, 1);
+	msleep(10);
+	gpio_set_value(mapphone_wl1271_pdata.bt_nshutdown_gpio, 0);
+	msleep(5);
+
+	return 0;
+}
+
+static void __init mapphone_bt_init(void)
+{
+	int bt_enable_gpio;
+	int bt_wake_gpio;
+
+	bt_enable_gpio = get_gpio_by_name("bt_reset_b");
+	if (bt_enable_gpio < 0) {
+		printk(KERN_DEBUG "mapphone_bt_init: cannot retrieve bt_reset_b gpio from device tree\n");
+		bt_enable_gpio = -1;
+	}
+	mapphone_wl1271_pdata.bt_nshutdown_gpio = bt_enable_gpio;
+
+	bt_wake_gpio = get_gpio_by_name("bt_wake_b");
+	if (bt_wake_gpio < 0) {
+		printk(KERN_DEBUG "mapphone_bt_init: cannot retrieve bt_wake_b gpio from device tree\n");
+		bt_wake_gpio = -1;
+	}
+	/* The 3 mux settings below are default; device tree will overwrite */
+	/* Mux setup for Bluetooth chip-enable */
+	omap_cfg_reg(T3_34XX_GPIO179);
+
+	platform_device_register(&mapphone_wl1271_device);
+}
+
 #endif
 
 static struct platform_device mapphone_sgx_device = {
@@ -1694,8 +1650,6 @@ static void __init mapphone_bp_model_init(void)
 #ifdef CONFIG_OMAP_RESET_CLOCKS
 	struct clk *clkp;
 #endif
-
-#ifdef CONFIG_ARM_OF
 	struct device_node *bp_node;
 	const void *bp_prop;
 
@@ -1706,7 +1660,6 @@ static void __init mapphone_bp_model_init(void)
 
 		of_node_put(bp_node);
 	}
-#endif
 #ifdef CONFIG_OMAP_RESET_CLOCKS
 	/* Enable sad2d iclk */
 	clkp = clk_get(NULL, "sad2d_ick");
@@ -1771,16 +1724,15 @@ static void __init mapphone_init(void)
 	mapphone_als_init();
 	mapphone_panel_init();
 	mapphone_sensors_init();
-	mapphone_camera_init();
 	mapphone_touch_init();
 	usb_musb_init();
 	mapphone_ehci_init();
 	mapphone_pm_init();
 	omap_hdq_init();
-#ifndef CONFIG_BT_WILINK
-	mapphone_bt_init();
-#else
+#if defined(CONFIG_BT_WILINK) || defined (CONFIG_BT_WILINK_MODULE) 
 	platform_add_devices(mapphone_devices, ARRAY_SIZE(mapphone_devices));
+#else
+	mapphone_bt_init();
 #endif
 	mapphone_hsmmc_init();
 	mapphone_sgx_init();

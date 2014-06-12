@@ -305,9 +305,9 @@ enum cpcap_reg {
 	CPCAP_REG_LMISC,	/* LMR Misc Bits */
 	CPCAP_REG_LMACE,	/* LMR Mace IC Support */
 	CPCAP_REG_TEST,         /* Test */
-	CPCAP_REG_ST_TEST1,     /* ST Test 1 */
-
-	CPCAP_REG_END = CPCAP_REG_ST_TEST1, /* End of CPCAP registers. */
+	CPCAP_REG_ST_TEST1,     /* ST Test1 */
+	CPCAP_REG_ST_TEST2,     /* ST Test2 */
+	CPCAP_REG_END = CPCAP_REG_ST_TEST2, /* End of CPCAP registers. */
 
 	CPCAP_REG_MAX		/* The largest valid register value. */
 	= CPCAP_REG_END,
@@ -845,6 +845,12 @@ int cpcap_uc_ram_read(struct cpcap_device *cpcap, unsigned short address,
 #if defined(CONFIG_LEDS_FLASH_RESET)
 int cpcap_direct_misc_write(unsigned short reg, unsigned short value,\
 			    unsigned short mask);
+#endif
+
+#ifdef CONFIG_PM
+int cpcap_irq_suspend(struct cpcap_device *cpcap);
+
+int cpcap_irq_resume(struct cpcap_device *cpcap);
 #endif
 
 #define  cpcap_driver_register platform_driver_register
