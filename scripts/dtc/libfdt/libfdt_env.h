@@ -14,14 +14,22 @@ static inline uint16_t fdt16_to_cpu(uint16_t x)
 
 static inline uint32_t fdt32_to_cpu(uint32_t x)
 {
+#ifdef CONFIG_MACH_OMAP_MAPPHONE
+	return x;
+#else
 	return (EXTRACT_BYTE(0) << 24) | (EXTRACT_BYTE(1) << 16) | (EXTRACT_BYTE(2) << 8) | EXTRACT_BYTE(3);
+#endif
 }
 #define cpu_to_fdt32(x) fdt32_to_cpu(x)
 
 static inline uint64_t fdt64_to_cpu(uint64_t x)
 {
+#ifdef CONFIG_MACH_OMAP_MAPPHONE
+	return x;
+#else
 	return (EXTRACT_BYTE(0) << 56) | (EXTRACT_BYTE(1) << 48) | (EXTRACT_BYTE(2) << 40) | (EXTRACT_BYTE(3) << 32)
 		| (EXTRACT_BYTE(4) << 24) | (EXTRACT_BYTE(5) << 16) | (EXTRACT_BYTE(6) << 8) | EXTRACT_BYTE(7);
+#endif
 }
 #define cpu_to_fdt64(x) fdt64_to_cpu(x)
 #undef EXTRACT_BYTE

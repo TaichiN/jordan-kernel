@@ -25,7 +25,7 @@
 
 #include <asm/page.h>
 
-#ifndef CONFIG_MACH_OMAP_MAPPHONE
+#ifdef CONFIG_MACH_OMAP_MAPPHONE
 /*
  * HACK: Historically, Motorola products used little endian device trees.
 */
