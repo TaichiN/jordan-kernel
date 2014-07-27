@@ -132,6 +132,7 @@ static void __exit_signal(struct task_struct *tsk)
 	 */
 	flush_sigqueue(&tsk->pending);
 
+	tsk->signal = NULL;
 	tsk->sighand = NULL;
 	spin_unlock(&sighand->siglock);
 
@@ -145,6 +146,7 @@ static void __exit_signal(struct task_struct *tsk)
 		 * see account_group_exec_runtime().
 		 */
 		task_rq_unlock_wait(tsk);
+		__cleanup_signal(sig);
 	}
 }
 
@@ -1010,7 +1012,7 @@ NORET_TYPE void do_exit(long code)
 	tsk->flags |= PF_EXITPIDONE;
 
 	if (tsk->io_context)
-		exit_io_context();
+		exit_io_context(tsk);
 
 	if (tsk->splice_pipe)
 		__free_pipe_info(tsk->splice_pipe);
